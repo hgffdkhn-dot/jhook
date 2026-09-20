@@ -72,10 +72,19 @@ jobs:
           build-tools: ${{ env.BUILD_TOOLS }}
 
       - name: 构建 Debug APK
+        id: build_debug
         if: github.event_name != 'workflow_dispatch' || inputs.build_type == 'debug' || inputs.build_type == 'both'
         run: ./gradlew :app:assembleDebug --stacktrace
 
+      # 兜底：若某个依赖版本号在 Google Maven 上不存在，自动放宽到 1.+ / 18.+ 再试一次
+      - name: 构建 Debug APK（依赖版本回退重试）
+        if: failure() && steps.build_debug.outcome == 'failure'
+        run: |
+          echo "::warning::依赖版本解析失败，改用动态版本重试"
+          ./gradlew :app:assembleDebug -PplayIntegrityVersion='1.+' -PgmsBaseVersion='18.+' --stacktrace
+
       - name: 构建 Release APK
+        id: build_release
         if: github.event_name == 'push' || inputs.build_type == 'release' || inputs.build_type == 'both'
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
@@ -87,10 +96,27 @@ jobs:
             echo "::notice::使用仓库 Secrets 中的签名密钥"
             echo "${KEYSTORE_BASE64}" | base64 -d > "${RUNNER_TEMP}/ci-keystore.jks"
             export KEYSTORE_FILE="${RUNNER_TEMP}/ci-keystore.jks"
+            export KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD
           else
             echo "::warning::未配置签名密钥，Release APK 将退回 debug 签名（仅供测试安装）"
           fi
           ./gradlew :app:assembleRelease --stacktrace
+
+      - name: 构建 Release APK（依赖版本回退重试）
+        if: failure() && steps.build_release.outcome == 'failure'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -n "${KEYSTORE_BASE64}" ] && [ -n "${KEY_ALIAS}" ]; then
+            echo "${KEYSTORE_BASE64}" | base64 -d > "${RUNNER_TEMP}/ci-keystore.jks"
+            export KEYSTORE_FILE="${RUNNER_TEMP}/ci-keystore.jks"
+            export KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD
+          fi
+          echo "::warning::依赖版本解析失败，改用动态版本重试"
+          ./gradlew :app:assembleRelease -PplayIntegrityVersion='1.+' -PgmsBaseVersion='18.+' --stacktrace
 
       - name: 整理产物
         run: |

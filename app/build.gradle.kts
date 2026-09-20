@@ -71,6 +71,13 @@ android {
     }
 }
 
+// Play Integrity / GMS 的版本抽成 Gradle 属性，方便在不改构建逻辑的情况下换版本，
+// CI 里也用它做「版本解析失败 → 自动回退到 1.+ / 18.+」的重试。
+val playIntegrityVersion =
+    (project.findProperty("playIntegrityVersion") as String?)?.takeIf { it.isNotBlank() } ?: "1.4.0"
+val gmsBaseVersion =
+    (project.findProperty("gmsBaseVersion") as String?)?.takeIf { it.isNotBlank() } ?: "18.5.0"
+
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
@@ -83,6 +90,9 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
     // Google Play Integrity（设备/应用完整性认证）
-    implementation("com.google.android.gms:play-integrity:1.4.0")
-    implementation("com.google.android.gms:play-services-base:18.5.0")
+    // 注意：代码里用的是 com.google.android.play.core.integrity.* 这套 Play Core 包，
+    // 对应的 artifact 是 com.google.android.play:integrity，不是 com.google.android.gms:play-integrity。
+    implementation("com.google.android.play:integrity:$playIntegrityVersion")
+    // GoogleApiAvailability / ConnectionResult 来自 play-services-base
+    implementation("com.google.android.gms:play-services-base:$gmsBaseVersion")
 }
