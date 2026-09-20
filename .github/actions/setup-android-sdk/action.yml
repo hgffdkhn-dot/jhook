@@ -1,0 +1,66 @@
+name: Setup Android SDK
+description: >
+  准备 Android SDK（代替已废弃的 android-actions/setup-android）。
+  该 action 内部会安装早已下架的 "tools" 包，在 cmdline-tools 环境下必然失败。
+  这里直接使用 GitHub Runner 预装的 SDK，并按需安装 platforms / build-tools。
+
+inputs:
+  compile-sdk:
+    description: compileSdk 版本
+    required: false
+    default: "34"
+  build-tools:
+    description: build-tools 版本
+    required: false
+    default: "34.0.0"
+
+runs:
+  using: composite
+  steps:
+    - name: 安装并授权 Android SDK 组件
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        export ANDROID_SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+        export ANDROID_HOME="$ANDROID_SDK_ROOT"
+        mkdir -p "$ANDROID_SDK_ROOT"
+
+        # 1. 定位 sdkmanager：Runner 预装的是 cmdline-tools/<ver>/bin/sdkmanager
+        SDKMANAGER=""
+        if [ -d "$ANDROID_SDK_ROOT/cmdline-tools" ]; then
+          SDKMANAGER="$(find "$ANDROID_SDK_ROOT/cmdline-tools" -maxdepth 3 -type f -name sdkmanager | head -n 1 || true)"
+        fi
+
+        # 2. 没有就下载一份最新的 cmdline-tools
+        if [ -z "$SDKMANAGER" ] || [ ! -x "$SDKMANAGER" ]; then
+          echo "::notice::未找到可用的 sdkmanager，下载 cmdline-tools"
+          curl -sSL --fail --retry 3 -o "${RUNNER_TEMP}/cmdline-tools.zip" \
+            "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
+          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools/latest"
+          unzip -q -o "${RUNNER_TEMP}/cmdline-tools.zip" -d "${RUNNER_TEMP}/cmdline-tools"
+          cp -r "${RUNNER_TEMP}/cmdline-tools/cmdline-tools/." "$ANDROID_SDK_ROOT/cmdline-tools/latest/"
+          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+        fi
+
+        chmod +x "$SDKMANAGER"
+        echo "::notice::使用 sdkmanager: $SDKMANAGER"
+
+        # 3. 自动接受许可证（放在 SDK 根目录下，Gradle 也会直接读取）
+        mkdir -p "$ANDROID_SDK_ROOT/licenses"
+        set +o pipefail
+        yes 2>/dev/null | "$SDKMANAGER" --sdk_root="$ANDROID_SDK_ROOT" --licenses >/dev/null 2>&1 || true
+        set -o pipefail
+
+        # 4. 只安装本项目真正需要的组件，绝不碰已下架的 "tools" 包
+        "$SDKMANAGER" --sdk_root="$ANDROID_SDK_ROOT" --install \
+          "platform-tools" \
+          "platforms;android-${{ inputs.compile-sdk }}" \
+          "build-tools;${{ inputs.build-tools }}"
+
+        echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+        echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+        echo "$ANDROID_SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+
+        # 5. 同时写一份 local.properties，避免 Gradle 找不到 SDK
+        echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties

@@ -22,7 +22,12 @@
 - **产出**：`device-integrity-apks-<sha>` 产物里是编译好的 APK（保留 30 天）；`lint-report` 是 Lint 报告；`gradle-wrapper` 是生成好的 wrapper（可下载后提交回仓库，省掉每次生成）。
 - **环境**：ubuntu-latest + JDK 17 + Gradle 8.7，Android SDK 与 Gradle 依赖均有缓存。
 
-第一次跑之前什么都不用配，工作流会自己补出缺少的 Gradle Wrapper。
+第一次跑之前什么都不用配，工作流会自己补出缺少的 Gradle Wrapper 并安装 SDK。
+
+> 注意：这里**没有**用 `android-actions/setup-android`。它会安装早已下架的 `tools` 包，
+> 在新版 Runner 上必然报 `Failed to find package 'tools'` + `sdkmanager exit 1`。
+> SDK 准备改由 `.github/actions/setup-android-sdk` 完成：直接用 Runner 预装的 SDK，
+> 只装 `platform-tools`、`platforms;android-34`、`build-tools;34.0.0`。
 
 ### 给 Release 包签名（可选）
 

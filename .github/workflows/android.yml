@@ -28,12 +28,14 @@ permissions:
 env:
   GRADLE_VERSION: "8.7"
   JAVA_VERSION: "17"
+  COMPILE_SDK: "34"
+  BUILD_TOOLS: "34.0.0"
 
 jobs:
   build:
     name: 构建 APK
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
 
     steps:
       - name: 检出代码
@@ -45,8 +47,11 @@ jobs:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
 
-      - name: 准备 Android SDK
-        uses: android-actions/setup-android@v3
+      # 先补 wrapper：这一步不依赖 Android SDK，即使 SDK 出问题也能先拿到可用的 gradlew
+      - name: 准备 Gradle Wrapper
+        uses: ./.github/actions/setup-gradle-wrapper
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
 
       - name: 缓存 Gradle 依赖
         uses: actions/cache@v4
@@ -54,14 +59,17 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle.kts', '**/gradle-wrapper.properties') }}
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
 
-      - name: 准备 Gradle Wrapper
-        uses: ./.github/actions/setup-gradle-wrapper
+      # 不使用 android-actions/setup-android：它会安装已下架的 "tools" 包导致
+      # "Failed to find package 'tools'" + sdkmanager exit 1
+      - name: 准备 Android SDK
+        uses: ./.github/actions/setup-android-sdk
         with:
-          gradle-version: ${{ env.GRADLE_VERSION }}
+          compile-sdk: ${{ env.COMPILE_SDK }}
+          build-tools: ${{ env.BUILD_TOOLS }}
 
       - name: 构建 Debug APK
         if: github.event_name != 'workflow_dispatch' || inputs.build_type == 'debug' || inputs.build_type == 'both'
@@ -98,7 +106,8 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-      - name: 上传 Gradle Wrapper（补回未提交的二进制文件）
+      # wrapper 是每次现生成的，顺手传一份：下载后提交回仓库，之后就不用再生成了
+      - name: 上传 Gradle Wrapper
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -123,7 +132,7 @@ jobs:
   lint:
     name: Android Lint
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     needs: build
 
     steps:
@@ -136,8 +145,10 @@ jobs:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
 
-      - name: 准备 Android SDK
-        uses: android-actions/setup-android@v3
+      - name: 准备 Gradle Wrapper
+        uses: ./.github/actions/setup-gradle-wrapper
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
 
       - name: 缓存 Gradle 依赖
         uses: actions/cache@v4
@@ -145,17 +156,18 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle.kts', '**/gradle-wrapper.properties') }}
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
 
-      - name: 准备 Gradle Wrapper
-        uses: ./.github/actions/setup-gradle-wrapper
+      - name: 准备 Android SDK
+        uses: ./.github/actions/setup-android-sdk
         with:
-          gradle-version: ${{ env.GRADLE_VERSION }}
+          compile-sdk: ${{ env.COMPILE_SDK }}
+          build-tools: ${{ env.BUILD_TOOLS }}
 
       - name: 运行 Lint
-        # 不阻断主构建：Lint 报警不影响 APK 产出，报告可在产物中查看
+        # 不阻断主构建：Lint 报警不影响 APK 产出，报告在产物里查看
         continue-on-error: true
         run: ./gradlew :app:lintDebug
 
