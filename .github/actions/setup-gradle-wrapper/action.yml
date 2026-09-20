@@ -24,50 +24,35 @@ runs:
         set -euo pipefail
         VERSION="${{ inputs.gradle-version }}"
         DIST_DIR="${RUNNER_TEMP}/gradle-dist-${VERSION}"
-        GRADLE_BIN=""
 
-        # 1. 先找已缓存 / 已存在的 Gradle
-        if [ -x "${DIST_DIR}/bin/gradle" ]; then
-          GRADLE_BIN="${DIST_DIR}/bin/gradle"
-        else
-          # 兼容早期版本把发行版套了一层目录的情况
-          GRADLE_BIN="$(find "$DIST_DIR" -maxdepth 3 -type f -name gradle -perm -u+x 2>/dev/null | head -n 1 || true)"
-        fi
+        # 发行版解压后自带 gradle-<version>/ 顶层目录，所以一律用 find 定位可执行文件，
+        # 不做任何目录平铺（平铺极易因目录名匹配出错而多套一层）
+        find_gradle() {
+          find "$DIST_DIR" -maxdepth 4 -type f -path "*/bin/gradle" -perm -u+x 2>/dev/null | head -n 1
+        }
 
-        # 2. 没有就下载并解压（注意：解压后目录是 gradle-<version>/，要平铺到 DIST_DIR）
+        GRADLE_BIN="$(find_gradle || true)"
+
         if [ -z "$GRADLE_BIN" ] || [ ! -x "$GRADLE_BIN" ]; then
           echo "::notice::未找到缓存的 Gradle ${VERSION}，开始下载"
-          EXTRACT_DIR="${RUNNER_TEMP}/gradle-extract-${VERSION}"
-          rm -rf "$EXTRACT_DIR" "$DIST_DIR"
-          mkdir -p "$EXTRACT_DIR"
-
+          mkdir -p "$DIST_DIR"
           curl -sSL --fail --retry 3 --retry-delay 2 \
             -o "${RUNNER_TEMP}/gradle-${VERSION}.zip" \
             "https://services.gradle.org/distributions/gradle-${VERSION}-bin.zip"
-          unzip -q "${RUNNER_TEMP}/gradle-${VERSION}.zip" -d "$EXTRACT_DIR"
-
-          # 把 gradle-<version>/* 平铺进 DIST_DIR，而不是把目录塞进去
-          SRC_DIR="$(find "$EXTRACT_DIR" -maxdepth 1 -type d -name "gradle-*" | head -n 1 || true)"
-          if [ -z "$SRC_DIR" ]; then
-            echo "::error::Gradle 发行版解压后未找到 gradle-* 目录"
-            ls -la "$EXTRACT_DIR"
-            exit 1
-          fi
-          mkdir -p "$DIST_DIR"
-          cp -a "${SRC_DIR}/." "${DIST_DIR}/"
-          rm -rf "$EXTRACT_DIR"
-          GRADLE_BIN="${DIST_DIR}/bin/gradle"
+          unzip -q -o "${RUNNER_TEMP}/gradle-${VERSION}.zip" -d "$DIST_DIR"
+          rm -f "${RUNNER_TEMP}/gradle-${VERSION}.zip"
+          GRADLE_BIN="$(find_gradle || true)"
         fi
 
-        if [ ! -x "$GRADLE_BIN" ]; then
-          echo "::error::Gradle 可执行文件不可用: ${GRADLE_BIN}"
+        if [ -z "$GRADLE_BIN" ] || [ ! -x "$GRADLE_BIN" ]; then
+          echo "::error::Gradle 可执行文件不可用，DIST_DIR=${DIST_DIR}"
           ls -la "$DIST_DIR" || true
           exit 1
         fi
+
         echo "::notice::使用 Gradle: ${GRADLE_BIN}"
         "$GRADLE_BIN" --version | head -n 4
 
-        # 3. 生成 wrapper
         if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
           echo "::notice::仓库缺少 gradle-wrapper.jar，生成 Gradle ${VERSION} Wrapper"
           WRAP_DIR="$(mktemp -d)"
@@ -75,12 +60,15 @@ runs:
               --gradle-version "$VERSION" --distribution-type bin --no-daemon -q )
 
           mkdir -p gradle/wrapper
-          [ -f "$WRAP_DIR/gradlew" ] && cp "$WRAP_DIR/gradlew" ./ || {
-            echo "::error::未生成 gradlew"; exit 1; }
+          if [ ! -f "$WRAP_DIR/gradlew" ]; then
+            echo "::error::未生成 gradlew"; ls -la "$WRAP_DIR"; exit 1
+          fi
+          cp "$WRAP_DIR/gradlew" ./
           [ -f "$WRAP_DIR/gradlew.bat" ] && cp "$WRAP_DIR/gradlew.bat" ./ || true
-          [ -f "$WRAP_DIR/gradle/wrapper/gradle-wrapper.jar" ] \
-            && cp "$WRAP_DIR/gradle/wrapper/gradle-wrapper.jar" gradle/wrapper/ || {
-            echo "::error::未生成 gradle-wrapper.jar"; exit 1; }
+          if [ ! -f "$WRAP_DIR/gradle/wrapper/gradle-wrapper.jar" ]; then
+            echo "::error::未生成 gradle-wrapper.jar"; ls -la "$WRAP_DIR/gradle/wrapper" || true; exit 1
+          fi
+          cp "$WRAP_DIR/gradle/wrapper/gradle-wrapper.jar" gradle/wrapper/
           cp "$WRAP_DIR/gradle/wrapper/gradle-wrapper.properties" gradle/wrapper/
           rm -rf "$WRAP_DIR"
         else
