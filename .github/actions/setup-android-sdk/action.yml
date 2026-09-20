@@ -1,8 +1,8 @@
 name: Setup Android SDK
 description: >
   准备 Android SDK（代替已废弃的 android-actions/setup-android）。
-  该 action 内部会安装早已下架的 "tools" 包，在 cmdline-tools 环境下必然失败。
-  这里直接使用 GitHub Runner 预装的 SDK，并按需安装 platforms / build-tools。
+  该 action 会安装早已下架的 "tools" 包，在 cmdline-tools 环境下必然失败。
+  本 action 直接使用 Runner 预装的 SDK，并按需安装 platforms / build-tools。
 
 inputs:
   compile-sdk:
@@ -20,47 +20,140 @@ runs:
     - name: 安装并授权 Android SDK 组件
       shell: bash
       run: |
-        set -euo pipefail
+        set -uo pipefail
 
-        export ANDROID_SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
-        export ANDROID_HOME="$ANDROID_SDK_ROOT"
-        mkdir -p "$ANDROID_SDK_ROOT"
+        COMPILE_SDK="${{ inputs.compile-sdk }}"
+        BUILD_TOOLS="${{ inputs.build-tools }}"
+        PKG_PLATFORM="platforms;android-${COMPILE_SDK}"
+        PKG_BT="build-tools;${BUILD_TOOLS}"
 
-        # 1. 定位 sdkmanager：Runner 预装的是 cmdline-tools/<ver>/bin/sdkmanager
+        TMP_ROOT="${RUNNER_TEMP:-/tmp}"
+        PRE_SDK="/usr/local/lib/android/sdk"
+
+        # ---------------------------------------------------------------
+        # 1. 选定一个「可写」的 SDK 根目录
+        #    /usr/local/lib/android/sdk 在部分 Runner 镜像里归 root 所有，
+        #    runner 用户无权写入/改权限（chmod: Operation not permitted），
+        #    因此先探测可写性，写不进去就用 RUNNER_TEMP 下自建的根目录。
+        # ---------------------------------------------------------------
+        SDK_ROOT=""
+        for cand in "${ANDROID_HOME:-}" "${ANDROID_SDK_ROOT:-}" "$PRE_SDK" "$HOME/android-sdk"; do
+          if [ -n "$cand" ] && [ -d "$cand" ] && [ -w "$cand" ]; then
+            SDK_ROOT="$cand"
+            break
+          fi
+        done
+
+        if [ -z "$SDK_ROOT" ]; then
+          SDK_ROOT="${TMP_ROOT}/android-sdk"
+          echo "::notice::预装 SDK 目录不可写，改用自有目录: ${SDK_ROOT}"
+        fi
+        mkdir -p "$SDK_ROOT"
+        echo "::notice::SDK 根目录: ${SDK_ROOT}"
+
+        # ---------------------------------------------------------------
+        # 2. 定位 sdkmanager：优先复用预装的，但绝不 chmod 不属于自己的文件
+        # ---------------------------------------------------------------
+        find_sdkmanager() {
+          local base="$1"
+          [ -d "$base/cmdline-tools" ] || return 0
+          find "$base/cmdline-tools" -maxdepth 3 -type f -name sdkmanager 2>/dev/null | head -n 1
+        }
+
         SDKMANAGER=""
-        if [ -d "$ANDROID_SDK_ROOT/cmdline-tools" ]; then
-          SDKMANAGER="$(find "$ANDROID_SDK_ROOT/cmdline-tools" -maxdepth 3 -type f -name sdkmanager | head -n 1 || true)"
-        fi
+        for cand in "$SDK_ROOT" "${ANDROID_HOME:-}" "$PRE_SDK"; do
+          [ -n "$cand" ] || continue
+          found="$(find_sdkmanager "$cand" || true)"
+          if [ -n "$found" ] && [ -x "$found" ]; then
+            SDKMANAGER="$found"
+            break
+          fi
+        done
 
-        # 2. 没有就下载一份最新的 cmdline-tools
-        if [ -z "$SDKMANAGER" ] || [ ! -x "$SDKMANAGER" ]; then
-          echo "::notice::未找到可用的 sdkmanager，下载 cmdline-tools"
-          curl -sSL --fail --retry 3 -o "${RUNNER_TEMP}/cmdline-tools.zip" \
+        # 预装的不可执行（或根本没找到）→ 自己下载一份到临时目录
+        if [ -z "$SDKMANAGER" ]; then
+          echo "::notice::未找到可执行的 sdkmanager，下载独立 cmdline-tools"
+          CMDLINE_DIR="${TMP_ROOT}/cmdline-tools"
+          rm -rf "$CMDLINE_DIR"
+          mkdir -p "$CMDLINE_DIR"
+          curl -sSL --fail --retry 3 --retry-delay 2 \
+            -o "${TMP_ROOT}/cmdline-tools.zip" \
             "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
-          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools/latest"
-          unzip -q -o "${RUNNER_TEMP}/cmdline-tools.zip" -d "${RUNNER_TEMP}/cmdline-tools"
-          cp -r "${RUNNER_TEMP}/cmdline-tools/cmdline-tools/." "$ANDROID_SDK_ROOT/cmdline-tools/latest/"
-          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          unzip -q -o "${TMP_ROOT}/cmdline-tools.zip" -d "${TMP_ROOT}/cmdline-tools-unzip"
+          # 解压后是 cmdline-tools/ 顶层目录，用 find 定位，不做目录平铺
+          SDKMANAGER="$(find "${TMP_ROOT}/cmdline-tools-unzip" -maxdepth 3 -type f -name sdkmanager | head -n 1 || true)"
+          if [ -n "$SDKMANAGER" ]; then
+            # 拷到我们自己的目录里再 chmod，避免碰 root 拥有的文件
+            SRC_BIN_DIR="$(dirname "$SDKMANAGER")"
+            SRC_HOME="$(dirname "$SRC_BIN_DIR")"
+            mkdir -p "$CMDLINE_DIR"
+            cp -a "${SRC_HOME}/." "${CMDLINE_DIR}/" 2>/dev/null || true
+            rm -rf "${TMP_ROOT}/cmdline-tools-unzip" "${TMP_ROOT}/cmdline-tools.zip"
+            SDKMANAGER="${CMDLINE_DIR}/bin/sdkmanager"
+            chmod +x "$SDKMANAGER" 2>/dev/null || true
+          fi
         fi
 
-        chmod +x "$SDKMANAGER"
-        echo "::notice::使用 sdkmanager: $SDKMANAGER"
+        if [ -z "$SDKMANAGER" ] || [ ! -x "$SDKMANAGER" ]; then
+          echo "::error::找不到可执行的 sdkmanager"
+          ls -la "$PRE_SDK/cmdline-tools" 2>/dev/null || true
+          exit 1
+        fi
+        echo "::notice::使用 sdkmanager: ${SDKMANAGER}"
 
-        # 3. 自动接受许可证（放在 SDK 根目录下，Gradle 也会直接读取）
-        mkdir -p "$ANDROID_SDK_ROOT/licenses"
-        set +o pipefail
-        yes 2>/dev/null | "$SDKMANAGER" --sdk_root="$ANDROID_SDK_ROOT" --licenses >/dev/null 2>&1 || true
-        set -o pipefail
+        # ---------------------------------------------------------------
+        # 3. 预置许可证（写进我们自己的 SDK_ROOT，无需 sdkmanager 交互）
+        # ---------------------------------------------------------------
+        mkdir -p "$SDK_ROOT/licenses"
+        # 用 printf 而不是 heredoc：YAML 块标量里逐行缩进容易在编辑时丢失
+        printf '%s\n' \
+          "24333f8a63b6825ea9c5514f83c2829b004d1fee" \
+          "8933bad161af4178b1185d1a37fbf41ea5269c55" \
+          "d56f5187479451eabf01fb78af6dfcb131a6481e" \
+          > "$SDK_ROOT/licenses/android-sdk-license"
+        printf '%s\n' "848749b081678f449f0c8f8a7b1d5c1e9b0e7a2" \
+          > "$SDK_ROOT/licenses/android-sdk-preview-license"
+        printf '%s\n' "d975f751698a77b662f1254ddbeed3901e976f5a" \
+          > "$SDK_ROOT/licenses/intel-android-extra-license"
 
-        # 4. 只安装本项目真正需要的组件，绝不碰已下架的 "tools" 包
-        "$SDKMANAGER" --sdk_root="$ANDROID_SDK_ROOT" --install \
-          "platform-tools" \
-          "platforms;android-${{ inputs.compile-sdk }}" \
-          "build-tools;${{ inputs.build-tools }}"
+        # ---------------------------------------------------------------
+        # 4. 安装组件（只装真正需要的，绝不碰已下架的 "tools" 包）
+        # ---------------------------------------------------------------
+        install() {
+          "$SDKMANAGER" --sdk_root="$SDK_ROOT" --install \
+            "platform-tools" "$PKG_PLATFORM" "$PKG_BT"
+        }
 
-        echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
-        echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
-        echo "$ANDROID_SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+        if ! install; then
+          echo "::warning::向 ${SDK_ROOT} 安装失败，回退到临时目录并重试"
+          SDK_ROOT="${TMP_ROOT}/android-sdk-fallback"
+          mkdir -p "$SDK_ROOT/licenses"
+          cp -a "$(dirname "$(dirname "$SDKMANAGER")")/." "$SDK_ROOT/../cmdline-tools-fallback" 2>/dev/null || true
+          mkdir -p "$SDK_ROOT/licenses"
+          printf '%s\n' \
+            "24333f8a63b6825ea9c5514f83c2829b004d1fee" \
+            "8933bad161af4178b1185d1a37fbf41ea5269c55" \
+            "d56f5187479451eabf01fb78af6dfcb131a6481e" \
+            > "$SDK_ROOT/licenses/android-sdk-license"
+          install || {
+            echo "::error::Android SDK 组件安装失败"
+            exit 1
+          }
+        fi
 
-        # 5. 同时写一份 local.properties，避免 Gradle 找不到 SDK
-        echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
+        # ---------------------------------------------------------------
+        # 5. 校验并导出环境
+        # ---------------------------------------------------------------
+        if [ ! -d "$SDK_ROOT/platforms/android-${COMPILE_SDK}" ]; then
+          echo "::error::缺少 platforms/android-${COMPILE_SDK}"
+          ls -la "$SDK_ROOT/platforms" || true
+          exit 1
+        fi
+
+        echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+        echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+        echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+        echo "sdk.dir=$SDK_ROOT" > local.properties
+
+        echo "::notice::Android SDK 就绪: $SDK_ROOT"
+        ls -la "$SDK_ROOT"
