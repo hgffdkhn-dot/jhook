@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 状态色（深色模式在 values-night 中覆盖） -->
+    <color name="status_pass">#2E7D32</color>
+    <color name="status_info">#5F6368</color>
+    <color name="status_warn">#B26A00</color>
+    <color name="status_danger">#B3261E</color>
+    <color name="status_error">#5F6368</color>
+    <color name="status_skip">#9AA0A6</color>
+
+    <color name="score_bg">#E7E0EC</color>
+    <color name="evidence_bg">#F2F2F5</color>
+    <color name="ic_launcher_background">#1F6F43</color>
+</resources>

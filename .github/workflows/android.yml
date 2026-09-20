@@ -1,0 +1,169 @@
+name: Android CI
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 构建类型
+        required: true
+        default: debug
+        type: choice
+        options:
+          - debug
+          - release
+          - both
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  GRADLE_VERSION: "8.7"
+  JAVA_VERSION: "17"
+
+jobs:
+  build:
+    name: 构建 APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: 准备 Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 缓存 Gradle 依赖
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle.kts', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: 准备 Gradle Wrapper
+        uses: ./.github/actions/setup-gradle-wrapper
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+
+      - name: 构建 Debug APK
+        if: github.event_name != 'workflow_dispatch' || inputs.build_type == 'debug' || inputs.build_type == 'both'
+        run: ./gradlew :app:assembleDebug --stacktrace
+
+      - name: 构建 Release APK
+        if: github.event_name == 'push' || inputs.build_type == 'release' || inputs.build_type == 'both'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -n "${KEYSTORE_BASE64}" ] && [ -n "${KEY_ALIAS}" ]; then
+            echo "::notice::使用仓库 Secrets 中的签名密钥"
+            echo "${KEYSTORE_BASE64}" | base64 -d > "${RUNNER_TEMP}/ci-keystore.jks"
+            export KEYSTORE_FILE="${RUNNER_TEMP}/ci-keystore.jks"
+          else
+            echo "::warning::未配置签名密钥，Release APK 将退回 debug 签名（仅供测试安装）"
+          fi
+          ./gradlew :app:assembleRelease --stacktrace
+
+      - name: 整理产物
+        run: |
+          mkdir -p outputs
+          find app/build/outputs/apk -type f -name "*.apk" -exec cp {} outputs/ \;
+          ls -lh outputs
+
+      - name: 上传 APK 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: device-integrity-apks-${{ github.sha }}
+          path: outputs/*.apk
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: 上传 Gradle Wrapper（补回未提交的二进制文件）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-wrapper
+          path: |
+            gradlew
+            gradlew.bat
+            gradle/wrapper/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: 发布到 GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: outputs/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  lint:
+    name: Android Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: build
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: 准备 Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 缓存 Gradle 依赖
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle.kts', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: 准备 Gradle Wrapper
+        uses: ./.github/actions/setup-gradle-wrapper
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+
+      - name: 运行 Lint
+        # 不阻断主构建：Lint 报警不影响 APK 产出，报告可在产物中查看
+        continue-on-error: true
+        run: ./gradlew :app:lintDebug
+
+      - name: 上传 Lint 报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-report
+          path: app/build/reports/lint-results-debug.html
+          retention-days: 14
+          if-no-files-found: ignore

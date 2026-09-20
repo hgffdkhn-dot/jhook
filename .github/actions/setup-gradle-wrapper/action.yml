@@ -1,0 +1,46 @@
+name: Setup Gradle Wrapper
+description: 确保仓库中存在可用的 Gradle Wrapper；缺少 gradle-wrapper.jar 时自动下载 Gradle 并生成。
+
+inputs:
+  gradle-version:
+    description: 使用的 Gradle 版本
+    required: false
+    default: "8.7"
+
+runs:
+  using: composite
+  steps:
+    - name: 缓存 Gradle 发行版
+      id: dist-cache
+      uses: actions/cache@v4
+      with:
+        path: /opt/gradle-${{ inputs.gradle-version }}
+        key: ${{ runner.os }}-gradle-dist-${{ inputs.gradle-version }}
+
+    - name: 生成或校验 Gradle Wrapper
+      shell: bash
+      run: |
+        set -euo pipefail
+        VERSION="${{ inputs.gradle-version }}"
+        DIST_DIR="/opt/gradle-${VERSION}"
+
+        if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
+          echo "::notice::仓库缺少 gradle-wrapper.jar，将自动生成 Gradle ${VERSION} Wrapper"
+          if [ ! -x "${DIST_DIR}/bin/gradle" ]; then
+            curl -sSL --fail -o /tmp/gradle.zip \
+              "https://services.gradle.org/distributions/gradle-${VERSION}-bin.zip"
+            unzip -q /tmp/gradle.zip -d /opt
+          fi
+          WRAP_DIR="$(mktemp -d)"
+          (cd "${WRAP_DIR}" && "${DIST_DIR}/bin/gradle" wrapper \
+            --gradle-version "${VERSION}" --distribution-type bin --no-daemon -q)
+          mkdir -p gradle/wrapper
+          cp "${WRAP_DIR}/gradlew" "${WRAP_DIR}/gradlew.bat" ./
+          cp "${WRAP_DIR}/gradle/wrapper/"* gradle/wrapper/
+          rm -rf "${WRAP_DIR}"
+        else
+          echo "::notice::已存在 gradle-wrapper.jar，直接使用"
+        fi
+
+        chmod +x gradlew
+        ./gradlew --version | head -n 6

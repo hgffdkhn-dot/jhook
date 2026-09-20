@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="status_pass">#66BB6A</color>
+    <color name="status_info">#9AA0A6</color>
+    <color name="status_warn">#F2B33D</color>
+    <color name="status_danger">#F28B82</color>
+    <color name="status_error">#9AA0A6</color>
+    <color name="status_skip">#80868B</color>
+
+    <color name="score_bg">#2A2F33</color>
+    <color name="evidence_bg">#202427</color>
+    <color name="ic_launcher_background">#123024</color>
+</resources>

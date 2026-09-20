@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <PreferenceCategory android:title="检测设置">
+        <SwitchPreferenceCompat
+            android:defaultValue="false"
+            android:key="pref_skip_slow"
+            android:summary="跳过耗时项目（系统目录全量扫描、Frida 端口扫描等），检测更快"
+            android:title="跳过耗时检测项"
+            app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat
+            android:defaultValue="false"
+            android:key="pref_strict_mode"
+            android:summary="开启后，“可疑”项也会导致最终结论判定为不通过"
+            android:title="严格模式"
+            app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat
+            android:defaultValue="true"
+            android:key="pref_scan_mount_detail"
+            android:summary="在结果中展示完整挂载表（条目较多）"
+            android:title="展示完整挂载表"
+            app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+
+    <PreferenceCategory android:title="谷歌证书与 Play Integrity">
+        <SwitchPreferenceCompat
+            android:defaultValue="false"
+            android:key="pref_enable_pi"
+            android:summary="需要设备装有 Google Play 服务，并在下方填入云端项目号"
+            android:title="启用 Play Integrity 检测"
+            app:iconSpaceReserved="false" />
+        <EditTextPreference
+            android:defaultValue=""
+            android:dependency="pref_enable_pi"
+            android:key="pref_cloud_project"
+            android:summary="在 Google Play 管理中心绑定后获得的 Cloud 项目号（纯数字）"
+            android:title="云端项目号"
+            app:iconSpaceReserved="false" />
+        <EditTextPreference
+            android:defaultValue=""
+            android:dependency="pref_enable_pi"
+            android:key="pref_pi_endpoint"
+            android:summary="用于解密 Integrity 令牌的服务器地址，例如 https://your.server/integrity"
+            android:title="服务端解密地址"
+            app:iconSpaceReserved="false" />
+        <SwitchPreferenceCompat
+            android:defaultValue="true"
+            android:key="pref_gms_check"
+            android:summary="校验系统信任库中的 Google 根证书与 GMS / 应用商店签名"
+            android:title="谷歌证书检查"
+            app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+
+    <PreferenceCategory android:title="应用自身完整性">
+        <EditTextPreference
+            android:defaultValue=""
+            android:key="pref_expected_sig"
+            android:summary="填入你自己的 release 签名 SHA-256（小写、无冒号），用于识别二次打包"
+            android:title="期望签名指纹"
+            app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+
+    <PreferenceCategory android:title="界面">
+        <ListPreference
+            android:defaultValue="system"
+            android:entries="@array/theme_entries"
+            android:entryValues="@array/theme_values"
+            android:key="pref_theme"
+            android:summary="%s"
+            android:title="主题模式"
+            app:useSimpleSummaryProvider="true" />
+        <SwitchPreferenceCompat
+            android:defaultValue="true"
+            android:key="pref_dynamic_color"
+            android:summary="从壁纸取色（Android 12+），修改后需重启应用"
+            android:title="Material You 动态取色"
+            app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+
+    <PreferenceCategory android:title="关于">
+        <Preference
+            android:key="pref_version"
+            android:summary="1.0.0"
+            android:title="版本"
+            app:iconSpaceReserved="false" />
+        <Preference
+            android:key="pref_disclaimer"
+            android:summary="本工具的所有检测均基于本地可见特征，结果仅供参考：绕过手段（隐藏、内核级 hook）可能导致漏报，部分正常设备也可能误报。请勿将单一检测结果作为唯一判定依据。"
+            android:title="免责声明"
+            app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+
+</PreferenceScreen>

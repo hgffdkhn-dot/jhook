@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+
+    <style name="Theme.DeviceIntegrity" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:statusBarColor">?attr/colorSurface</item>
+        <item name="android:navigationBarColor">?attr/colorSurface</item>
+        <item name="colorAccent">?attr/colorPrimary</item>
+        <item name="preferenceTheme">@style/PreferenceThemeOverlay</item>
+        <item name="android:windowTranslucentStatus" tools:targetApi="19">false</item>
+    </style>
+
+    <style name="Theme.DeviceIntegrity.Dialog" parent="Theme.Material3.DayNight.Dialog" />
+
+    <style name="TextAppearance.DeviceIntegrity.Headline" parent="TextAppearance.Material3.HeadlineSmall" />
+    <style name="TextAppearance.DeviceIntegrity.Title" parent="TextAppearance.Material3.TitleMedium" />
+    <style name="TextAppearance.DeviceIntegrity.Body" parent="TextAppearance.Material3.BodyMedium" />
+    <style name="TextAppearance.DeviceIntegrity.Label" parent="TextAppearance.Material3.BodySmall" />
+
+    <style name="Widget.DeviceIntegrity.Card" parent="Widget.Material3.CardView.Elevated">
+        <item name="cardCornerRadius">16dp</item>
+    </style>
+</resources>
