@@ -78,7 +78,7 @@ object MountChecks {
     fun loopDevices(): Outcome {
         val mounts = Proc.mounts()
         val hit = mounts.filter { m -> m.source.startsWith("/dev/block/loop") }
-        val evidence = hit.map { "${m.target} <- ${m.source} [${m.fs}]" }
+        val evidence = hit.map { m -> "${m.target} <- ${m.source} [${m.fs}]" }
             .ifEmpty { listOf("无 loop 设备挂载") }
         return if (hit.isNotEmpty()) {
             Outcome(Status.WARN, "发现 ${hit.size} 个 loop 设备挂载（常见于模块镜像）", evidence)

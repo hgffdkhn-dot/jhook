@@ -201,8 +201,9 @@ object SystemChecks {
 
     /** 10. OEM 解锁开关 */
     fun oemUnlock(context: Context): Outcome {
+        // Settings.Global.OEM_UNLOCK_ALLOWED 是 @hide 的，编译期拿不到，直接用字符串键读取
         val v = runCatching {
-            Settings.Global.getInt(context.contentResolver, Settings.Global.OEM_UNLOCK_ALLOWED)
+            Settings.Global.getInt(context.contentResolver, "oem_unlock_allowed")
         }.getOrDefault(-1)
         val dev = runCatching {
             Settings.Global.getInt(context.contentResolver, Settings.Global.DEVELOPMENT_SETTINGS_ENABLED)

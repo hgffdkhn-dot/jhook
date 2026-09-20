@@ -62,7 +62,11 @@ object MagiskChecks {
         val procs = Proc.hasProcess("magiskd", "magiskinit", "magisk", "ksud", "apd", "su", "daemonsu")
         val cmdline = Proc.procCmdlineMatch("magisk", "ksud", "apd", "daemonsu")
         val evidence = mutableListOf<String>()
-        evidence += if (procs.isEmpty()) "ps 中未发现相关进程" else procs.map { "ps: $it" }
+        if (procs.isEmpty()) {
+            evidence += "ps 中未发现相关进程"
+        } else {
+            evidence += procs.map { "ps: $it" }
+        }
         if (cmdline.isNotEmpty()) evidence += cmdline.map { "/proc: $it" }
         val hit = procs.isNotEmpty() || cmdline.isNotEmpty()
         return if (hit) {

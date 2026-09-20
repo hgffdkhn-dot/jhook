@@ -39,7 +39,7 @@ class ChecksFragment : Fragment(com.detect.integrity.R.layout.fragment_checks) {
             b.progress.hide()
             if (_b == null) return@launch
             val body = buildString {
-                append("状态：").append(statusText(requireContext(), r.status)).append("\n\n")
+                append("状态：").append(requireContext().statusText(r.status)).append("\n\n")
                 append(r.summary).append("\n")
                 if (r.evidence.isNotEmpty()) {
                     append("\n—— 详细信息 ——\n")
