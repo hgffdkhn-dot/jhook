@@ -25,8 +25,7 @@ runs:
         VERSION="${{ inputs.gradle-version }}"
         DIST_DIR="${RUNNER_TEMP}/gradle-dist-${VERSION}"
 
-        # 发行版解压后自带 gradle-<version>/ 顶层目录，所以一律用 find 定位可执行文件，
-        # 不做任何目录平铺（平铺极易因目录名匹配出错而多套一层）
+        # 发行版解压后自带 gradle-<version>/ 顶层目录，一律用 find 定位，不做目录平铺
         find_gradle() {
           find "$DIST_DIR" -maxdepth 4 -type f -path "*/bin/gradle" -perm -u+x 2>/dev/null | head -n 1
         }
@@ -49,15 +48,37 @@ runs:
           ls -la "$DIST_DIR" || true
           exit 1
         fi
-
         echo "::notice::使用 Gradle: ${GRADLE_BIN}"
         "$GRADLE_BIN" --version | head -n 4
 
-        if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
+        if [ -f gradle/wrapper/gradle-wrapper.jar ]; then
+          echo "::notice::已存在 gradle-wrapper.jar，直接使用仓库内的版本"
+        else
           echo "::notice::仓库缺少 gradle-wrapper.jar，生成 Gradle ${VERSION} Wrapper"
+
+          # 关键：`gradle wrapper` 必须在含 settings 文件的目录中执行，
+          # 在空临时目录里跑会报 "does not contain a Gradle build"，
+          # 直接在工作区根目录跑又会触发 Android 插件解析，因此用一个极简的空壳工程。
           WRAP_DIR="$(mktemp -d)"
-          ( cd "$WRAP_DIR" && "$GRADLE_BIN" wrapper \
-              --gradle-version "$VERSION" --distribution-type bin --no-daemon -q )
+          {
+            echo 'rootProject.name = "wrapper-gen"'
+          } > "$WRAP_DIR/settings.gradle"
+
+          if ( cd "$WRAP_DIR" && "$GRADLE_BIN" wrapper \
+                --gradle-version "$VERSION" --distribution-type bin --no-daemon -q ); then
+            echo "::notice::gradle wrapper 任务执行成功"
+          else
+            echo "::warning::gradle wrapper 任务失败，改用直接下载 gradle-wrapper.jar"
+            BASE="https://raw.githubusercontent.com/gradle/gradle/v${VERSION}.0/gradle/wrapper"
+            curl -sSL --fail --retry 3 -o "$WRAP_DIR/gradle-wrapper.jar" \
+              "${BASE}/gradle-wrapper.jar"
+            curl -sSL --fail --retry 3 -o "$WRAP_DIR/gradlew" \
+              "https://raw.githubusercontent.com/gradle/gradle/v${VERSION}.0/gradlew"
+            curl -sSL --fail --retry 3 -o "$WRAP_DIR/gradlew.bat" \
+              "https://raw.githubusercontent.com/gradle/gradle/v${VERSION}.0/gradlew.bat"
+            mkdir -p "$WRAP_DIR/gradle/wrapper"
+            cp "$WRAP_DIR/gradle-wrapper.jar" "$WRAP_DIR/gradle/wrapper/"
+          fi
 
           mkdir -p gradle/wrapper
           if [ ! -f "$WRAP_DIR/gradlew" ]; then
@@ -65,16 +86,33 @@ runs:
           fi
           cp "$WRAP_DIR/gradlew" ./
           [ -f "$WRAP_DIR/gradlew.bat" ] && cp "$WRAP_DIR/gradlew.bat" ./ || true
-          if [ ! -f "$WRAP_DIR/gradle/wrapper/gradle-wrapper.jar" ]; then
-            echo "::error::未生成 gradle-wrapper.jar"; ls -la "$WRAP_DIR/gradle/wrapper" || true; exit 1
+
+          JAR="$(find "$WRAP_DIR" -type f -name 'gradle-wrapper.jar' | head -n 1 || true)"
+          if [ -z "$JAR" ]; then
+            echo "::error::未生成 gradle-wrapper.jar"; exit 1
           fi
-          cp "$WRAP_DIR/gradle/wrapper/gradle-wrapper.jar" gradle/wrapper/
-          cp "$WRAP_DIR/gradle/wrapper/gradle-wrapper.properties" gradle/wrapper/
+          cp "$JAR" gradle/wrapper/gradle-wrapper.jar
+
+          if [ -f "$WRAP_DIR/gradle/wrapper/gradle-wrapper.properties" ]; then
+            cp "$WRAP_DIR/gradle/wrapper/gradle-wrapper.properties" gradle/wrapper/
+          fi
           rm -rf "$WRAP_DIR"
-        else
-          echo "::notice::已存在 gradle-wrapper.jar，直接使用仓库内的版本"
         fi
 
         chmod +x gradlew
         ls -l gradle/wrapper/
+
+        # 固定 distributionUrl，避免被别的版本覆盖
+        # （这里用 printf 而不是 heredoc：块里的内容会带上缩进，导致 properties 解析失败）
+        printf '%s\n' \
+          "distributionBase=GRADLE_USER_HOME" \
+          "distributionPath=wrapper/dists" \
+          "distributionUrl=https\\://services.gradle.org/distributions/gradle-${VERSION}-bin.zip" \
+          "networkTimeout=10000" \
+          "validateDistributionUrl=true" \
+          "zipStoreBase=GRADLE_USER_HOME" \
+          "zipStorePath=wrapper/dists" \
+          > gradle/wrapper/gradle-wrapper.properties
+        cat gradle/wrapper/gradle-wrapper.properties
+
         ./gradlew --version | head -n 6
